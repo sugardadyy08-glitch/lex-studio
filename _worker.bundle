@@ -1,0 +1,1163 @@
+------formdata-undici-017295161229
+Content-Disposition: form-data; name="metadata"
+
+{"main_module":"functionsWorker-0.14631654346718015.js"}
+------formdata-undici-017295161229
+Content-Disposition: form-data; name="functionsWorker-0.14631654346718015.js"; filename="functionsWorker-0.14631654346718015.js"
+Content-Type: application/javascript+module
+
+var __defProp = Object.defineProperty;
+var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
+
+// _lib/roblox-oauth.js
+var AUTHORIZATION_ENDPOINT = "https://apis.roblox.com/oauth/v1/authorize";
+var TOKEN_ENDPOINT = "https://apis.roblox.com/oauth/v1/token";
+var USERINFO_ENDPOINT = "https://apis.roblox.com/oauth/v1/userinfo";
+var COOKIE_MAX_AGE = 600;
+function base64UrlEncode(bytes) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+__name(base64UrlEncode, "base64UrlEncode");
+function randomToken() {
+  return base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)));
+}
+__name(randomToken, "randomToken");
+function secureCookie(request, name, value, maxAge = COOKIE_MAX_AGE) {
+  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+  return `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
+}
+__name(secureCookie, "secureCookie");
+function clearOAuthCookies(request) {
+  return [
+    secureCookie(request, "rbx_oauth_state", "", 0),
+    secureCookie(request, "rbx_oauth_verifier", "", 0)
+  ];
+}
+__name(clearOAuthCookies, "clearOAuthCookies");
+function getOAuthConfig(env) {
+  const clientId = env.ROBLOX_CLIENT_ID?.trim();
+  const clientSecret = env.ROBLOX_CLIENT_SECRET?.trim();
+  const redirectUri = env.REDIRECT_URI?.trim();
+  const scopes = ["openid", "profile"];
+  if (!clientId || !clientSecret || !redirectUri) {
+    throw new Error("Set ROBLOX_CLIENT_ID, ROBLOX_CLIENT_SECRET, and REDIRECT_URI in Pages environment variables.");
+  }
+  let parsedRedirectUri;
+  try {
+    parsedRedirectUri = new URL(redirectUri);
+  } catch {
+    throw new Error("REDIRECT_URI must be a valid absolute URL.");
+  }
+  if (parsedRedirectUri.protocol !== "https:" && parsedRedirectUri.hostname !== "localhost") {
+    throw new Error("REDIRECT_URI must use HTTPS (localhost is allowed for local development).");
+  }
+  if (parsedRedirectUri.pathname !== "/api/auth/callback") {
+    throw new Error("REDIRECT_URI must use the /api/auth/callback path.");
+  }
+  return { clientId, clientSecret, redirectUri, scopes };
+}
+__name(getOAuthConfig, "getOAuthConfig");
+function getCookie(request, name) {
+  const cookies = request.headers.get("Cookie") ?? "";
+  for (const part of cookies.split(";")) {
+    const separator = part.indexOf("=");
+    if (separator < 0) continue;
+    if (part.slice(0, separator).trim() === name) {
+      return part.slice(separator + 1).trim();
+    }
+  }
+  return "";
+}
+__name(getCookie, "getCookie");
+function constantTimeEqual(left, right) {
+  if (left.length !== right.length) return false;
+  let difference = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    difference |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+  return difference === 0;
+}
+__name(constantTimeEqual, "constantTimeEqual");
+function htmlResponse(title, message, status = 400, extra = "") {
+  const body = `<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>${escapeHtml(title)} \u2014 Lex Studio</title>
+  <style>
+    body{margin:0;padding:32px;background:#080d13;color:#e8edf4;font:16px system-ui,sans-serif}
+    main{max-width:640px;margin:8vh auto;padding:24px;border:1px solid #26343f;border-radius:16px;background:#0d141c}
+    h1{font-size:22px}p,dd{color:#aab7c1;line-height:1.6}dt{margin-top:14px;color:#73899a;font-size:12px;text-transform:uppercase}
+    a{color:#9fc6da}code{overflow-wrap:anywhere}
+  </style>
+</head>
+<body><main><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p>${extra}<p><a href="https://lex-studio.pages.dev/#/spoof-asset">Kembali ke Lex Studio</a></p></main></body>
+</html>`;
+  return new Response(body, {
+    status,
+    headers: {
+      "Cache-Control": "no-store",
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
+      "Content-Type": "text/html; charset=utf-8",
+      "Referrer-Policy": "no-referrer",
+      "X-Content-Type-Options": "nosniff"
+    }
+  });
+}
+__name(htmlResponse, "htmlResponse");
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[character]);
+}
+__name(escapeHtml, "escapeHtml");
+function parseCookieHeader(request, state, verifier) {
+  const cookies = [
+    secureCookie(request, "rbx_oauth_state", state),
+    secureCookie(request, "rbx_oauth_verifier", verifier)
+  ];
+  return cookies;
+}
+__name(parseCookieHeader, "parseCookieHeader");
+function createAuthorizationResponse(request, env) {
+  let config;
+  try {
+    config = getOAuthConfig(env);
+  } catch (error) {
+    console.error("Roblox OAuth configuration is invalid.", error);
+    return htmlResponse("OAuth belum dikonfigurasi", "Konfigurasi OAuth server belum lengkap.", 500);
+  }
+  const state = randomToken();
+  const verifier = randomToken();
+  return crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)).then((digest) => {
+    const challenge = base64UrlEncode(new Uint8Array(digest));
+    const authorizationUrl = new URL(AUTHORIZATION_ENDPOINT);
+    authorizationUrl.searchParams.set("client_id", config.clientId);
+    authorizationUrl.searchParams.set("response_type", "code");
+    authorizationUrl.searchParams.set("redirect_uri", config.redirectUri);
+    authorizationUrl.searchParams.set("scope", config.scopes.join(" "));
+    authorizationUrl.searchParams.set("state", state);
+    authorizationUrl.searchParams.set("code_challenge", challenge);
+    authorizationUrl.searchParams.set("code_challenge_method", "S256");
+    const response = new Response(null, {
+      status: 302,
+      headers: {
+        "Cache-Control": "no-store",
+        "Location": authorizationUrl.href,
+        "Referrer-Policy": "no-referrer"
+      }
+    });
+    for (const cookie of parseCookieHeader(request, state, verifier)) {
+      response.headers.append("Set-Cookie", cookie);
+    }
+    return response;
+  }).catch((error) => {
+    console.error("Unable to create Roblox OAuth authorization request.", error);
+    return htmlResponse("Login gagal", "Tidak dapat memulai login Roblox.", 500);
+  });
+}
+__name(createAuthorizationResponse, "createAuthorizationResponse");
+function getGrantedScopes(token) {
+  if (typeof token.scope !== "string") return [];
+  return token.scope.split(/\s+/).filter(Boolean);
+}
+__name(getGrantedScopes, "getGrantedScopes");
+async function completeOAuth(request, env) {
+  const url = new URL(request.url);
+  const cookiesToClear = clearOAuthCookies(request);
+  const oauthError = url.searchParams.get("error");
+  if (oauthError) {
+    const response = htmlResponse("Otorisasi ditolak", "Anda menolak atau membatalkan otorisasi Roblox. Tidak ada access token yang disimpan.", 400);
+    for (const cookie of cookiesToClear) response.headers.append("Set-Cookie", cookie);
+    return response;
+  }
+  const code = url.searchParams.get("code");
+  const returnedState = url.searchParams.get("state");
+  const storedState = getCookie(request, "rbx_oauth_state");
+  const verifier = getCookie(request, "rbx_oauth_verifier");
+  if (!code || !returnedState || !storedState || !verifier || !constantTimeEqual(returnedState, storedState)) {
+    const response = htmlResponse("Callback tidak valid", "Parameter OAuth tidak lengkap atau pemeriksaan state gagal. Mulai login kembali.", 400);
+    for (const cookie of cookiesToClear) response.headers.append("Set-Cookie", cookie);
+    return response;
+  }
+  let config;
+  try {
+    config = getOAuthConfig(env);
+  } catch (error) {
+    console.error("Roblox OAuth configuration is invalid.", error);
+    const response = htmlResponse("OAuth belum dikonfigurasi", "Konfigurasi OAuth server belum lengkap.", 500);
+    for (const cookie of cookiesToClear) response.headers.append("Set-Cookie", cookie);
+    return response;
+  }
+  try {
+    const tokenResponse = await fetch(TOKEN_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: config.redirectUri,
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+        code_verifier: verifier
+      }),
+      signal: AbortSignal.timeout(1e4)
+    });
+    if (!tokenResponse.ok) {
+      console.error(`Roblox OAuth token exchange returned HTTP ${tokenResponse.status}.`);
+      let tokenError;
+      try {
+        tokenError = await tokenResponse.json();
+      } catch {
+        tokenError = null;
+      }
+      const message = tokenError?.error === "invalid_grant" ? "Authorization code tidak valid, sudah digunakan, atau kedaluwarsa. Mulai login Roblox kembali." : tokenError?.error === "invalid_client" ? "Roblox menolak kredensial aplikasi. Periksa client ID dan secret pada environment server." : "Roblox menolak penukaran authorization code. Periksa konfigurasi aplikasi dan callback URL.";
+      const response2 = htmlResponse("Login Roblox gagal", message, 502);
+      for (const cookie of cookiesToClear) response2.headers.append("Set-Cookie", cookie);
+      return response2;
+    }
+    const token = await tokenResponse.json();
+    if (typeof token.access_token !== "string" || !token.access_token) {
+      console.error("Roblox OAuth token response did not contain an access token.");
+      const response2 = htmlResponse("Login Roblox gagal", "Respons token Roblox tidak lengkap.", 502);
+      for (const cookie of cookiesToClear) response2.headers.append("Set-Cookie", cookie);
+      return response2;
+    }
+    const profileResponse = await fetch(USERINFO_ENDPOINT, {
+      headers: { Authorization: `Bearer ${token.access_token}`, Accept: "application/json" },
+      signal: AbortSignal.timeout(1e4)
+    });
+    if (!profileResponse.ok) {
+      console.error(`Roblox OAuth userinfo returned HTTP ${profileResponse.status}.`);
+      const message = profileResponse.status === 401 ? "Access token ditolak atau kedaluwarsa. Mulai login Roblox kembali." : "Login berhasil, tetapi Roblox tidak mengembalikan profil pengguna.";
+      const response2 = htmlResponse("Profil tidak tersedia", message, 502);
+      for (const cookie of cookiesToClear) response2.headers.append("Set-Cookie", cookie);
+      return response2;
+    }
+    const profile = await profileResponse.json();
+    const displayName = profile.name || profile.preferred_username || "Roblox user";
+    const username = profile.preferred_username || profile.nickname || "Tidak tersedia";
+    const subject = profile.sub || "Tidak tersedia";
+    const scopes = getGrantedScopes(token);
+    const scopeMarkup = scopes.length ? `<ul>${scopes.map((scope) => `<li>${escapeHtml(scope)}</li>`).join("")}</ul>` : "<p>Roblox tidak menyertakan daftar scope pada respons token.</p>";
+    const extra = `<dl>
+      <dt>Nama</dt><dd>${escapeHtml(displayName)}</dd>
+      <dt>Username</dt><dd>${escapeHtml(username)}</dd>
+      <dt>Roblox user ID (sub)</dt><dd><code>${escapeHtml(subject)}</code></dd>
+      <dt>Scope yang diberikan</dt><dd>${scopeMarkup}</dd>
+    </dl><p>Access token hanya digunakan di server untuk membaca userinfo dan tidak dikirim atau ditampilkan di browser. Endpoint userinfo tidak mengembalikan daftar aset milik pengguna.</p>`;
+    const response = htmlResponse("Login Roblox berhasil", "Profil dasar berhasil dibaca dari Roblox OpenID Connect.", 200, extra);
+    for (const cookie of cookiesToClear) response.headers.append("Set-Cookie", cookie);
+    return response;
+  } catch (error) {
+    const timedOut = error instanceof Error && error.name === "TimeoutError";
+    console.error("Roblox OAuth callback failed.", error);
+    const response = htmlResponse(
+      "Login Roblox gagal",
+      timedOut ? "Permintaan ke Roblox melewati batas waktu." : "Terjadi kesalahan saat menyelesaikan login Roblox.",
+      502
+    );
+    for (const cookie of cookiesToClear) response.headers.append("Set-Cookie", cookie);
+    return response;
+  }
+}
+__name(completeOAuth, "completeOAuth");
+
+// api/auth/callback.js
+async function onRequest({ request, env }) {
+  if (request.method !== "GET") {
+    return new Response("Method not allowed.", {
+      status: 405,
+      headers: { Allow: "GET", "Cache-Control": "no-store" }
+    });
+  }
+  return completeOAuth(request, env);
+}
+__name(onRequest, "onRequest");
+
+// api/auth/login.js
+async function onRequest2({ request, env }) {
+  if (request.method !== "GET") {
+    return new Response("Method not allowed.", {
+      status: 405,
+      headers: { Allow: "GET", "Cache-Control": "no-store" }
+    });
+  }
+  return createAuthorizationResponse(request, env);
+}
+__name(onRequest2, "onRequest");
+
+// api/catalog/details.js
+var ALLOWED_ORIGINS = /* @__PURE__ */ new Set([
+  "https://lex-studio.pages.dev",
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://localhost:8788",
+  "http://127.0.0.1:8788"
+]);
+var MAX_ITEMS_PER_REQUEST = 20;
+var MAX_BODY_BYTES = 4096;
+var ROBLOX_ENDPOINT = "https://catalog.roblox.com/v1/catalog/items/details";
+var robloxCsrfToken;
+function jsonResponse(body, status, origin) {
+  const headers = new Headers({
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Content-Type-Options": "nosniff"
+  });
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    headers.set("Access-Control-Allow-Origin", origin);
+    headers.set("Vary", "Origin");
+  }
+  return new Response(JSON.stringify(body), { status, headers });
+}
+__name(jsonResponse, "jsonResponse");
+function parseItemIds(value) {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_ITEMS_PER_REQUEST) {
+    return null;
+  }
+  const ids = [];
+  for (const item of value) {
+    if (typeof item !== "string" && typeof item !== "number") return null;
+    const text = String(item);
+    if (!/^[1-9]\d{0,15}$/.test(text)) return null;
+    const id = Number(text);
+    if (!Number.isSafeInteger(id) || id <= 0) return null;
+    ids.push(id);
+  }
+  return [...new Set(ids)];
+}
+__name(parseItemIds, "parseItemIds");
+async function onRequest3({ request }) {
+  const origin = request.headers.get("Origin");
+  const url = new URL(request.url);
+  if (url.pathname !== "/api/catalog/details") {
+    return jsonResponse({ error: "Not found." }, 404, origin);
+  }
+  if (request.method === "OPTIONS") {
+    if (origin && !ALLOWED_ORIGINS.has(origin)) {
+      return jsonResponse({ error: "Origin not allowed." }, 403, origin);
+    }
+    const headers = new Headers({
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Max-Age": "86400",
+      "Cache-Control": "no-store",
+      "Vary": "Origin"
+    });
+    if (origin) headers.set("Access-Control-Allow-Origin", origin);
+    return new Response(null, { status: 204, headers });
+  }
+  if (request.method !== "POST") {
+    return jsonResponse({ error: "Method not allowed." }, 405, origin);
+  }
+  if (origin && !ALLOWED_ORIGINS.has(origin)) {
+    return jsonResponse({ error: "Origin not allowed." }, 403, origin);
+  }
+  if (!request.headers.get("Content-Type")?.toLowerCase().includes("application/json")) {
+    return jsonResponse({ error: "Content-Type must be application/json." }, 415, origin);
+  }
+  const contentLength = Number(request.headers.get("Content-Length") ?? 0);
+  if (contentLength > MAX_BODY_BYTES) {
+    return jsonResponse({ error: "Request body is too large." }, 413, origin);
+  }
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ error: "Request body must be valid JSON." }, 400, origin);
+  }
+  const ids = parseItemIds(body?.itemIds);
+  if (!ids) {
+    return jsonResponse({
+      error: `itemIds must contain between 1 and ${MAX_ITEMS_PER_REQUEST} positive Roblox item IDs.`
+    }, 400, origin);
+  }
+  try {
+    const makeRequest = /* @__PURE__ */ __name(() => fetch(ROBLOX_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        ...robloxCsrfToken ? { "x-csrf-token": robloxCsrfToken } : {}
+      },
+      body: JSON.stringify({
+        items: ids.map((id) => ({ itemType: 1, id }))
+      }),
+      signal: AbortSignal.timeout(1e4)
+    }), "makeRequest");
+    let upstream;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      upstream = await makeRequest();
+      if (upstream.status !== 403) break;
+      const nextToken = upstream.headers.get("x-csrf-token");
+      if (!nextToken) break;
+      robloxCsrfToken = nextToken;
+    }
+    if (upstream.status === 429) {
+      const response = jsonResponse({
+        error: "Roblox rate limit reached. Wait before making another request."
+      }, 429, origin);
+      const retryAfter = upstream.headers.get("Retry-After");
+      if (retryAfter) response.headers.set("Retry-After", retryAfter);
+      return response;
+    }
+    if (!upstream.ok) {
+      return jsonResponse({
+        error: "Roblox catalog request failed.",
+        upstreamStatus: upstream.status
+      }, 502, origin);
+    }
+    let result;
+    try {
+      result = await upstream.json();
+    } catch {
+      return jsonResponse({ error: "Roblox returned an invalid JSON response." }, 502, origin);
+    }
+    if (!result || !Array.isArray(result.data)) {
+      return jsonResponse({ error: "Roblox returned an unexpected catalog response." }, 502, origin);
+    }
+    return jsonResponse({ data: result.data }, 200, origin);
+  } catch (error) {
+    const timedOut = error instanceof Error && error.name === "TimeoutError";
+    return jsonResponse({
+      error: timedOut ? "Roblox catalog request timed out." : "Could not reach the Roblox catalog."
+    }, 502, origin);
+  }
+}
+__name(onRequest3, "onRequest");
+
+// api/assets/[[path]].js
+var ALLOWED_ORIGINS2 = /* @__PURE__ */ new Set([
+  "https://lex-studio.pages.dev",
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://localhost:8788",
+  "http://127.0.0.1:8788"
+]);
+var MAX_ASSETS_PER_REQUEST = 10;
+var MAX_BODY_BYTES2 = 2048;
+var ASSET_DETAILS_ENDPOINT = "https://economy.roblox.com/v2/assets";
+var THUMBNAILS_ENDPOINT = "https://thumbnails.roblox.com/v1/assets";
+var ASSET_TYPES = /* @__PURE__ */ new Map([
+  [1, "Image"],
+  [3, "Audio"],
+  [13, "Decal"],
+  [24, "Animation"]
+]);
+var RobloxRateLimitError = class extends Error {
+  static {
+    __name(this, "RobloxRateLimitError");
+  }
+  constructor(retryAfter) {
+    super("Roblox rate limit reached.");
+    this.retryAfter = retryAfter;
+  }
+};
+function jsonResponse2(body, status, origin) {
+  const headers = new Headers({
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Content-Type-Options": "nosniff"
+  });
+  if (origin && ALLOWED_ORIGINS2.has(origin)) {
+    headers.set("Access-Control-Allow-Origin", origin);
+    headers.set("Vary", "Origin");
+  }
+  return new Response(JSON.stringify(body), { status, headers });
+}
+__name(jsonResponse2, "jsonResponse");
+function validId(value) {
+  return typeof value === "string" && /^[1-9]\d{0,15}$/.test(value) && Number.isSafeInteger(Number(value));
+}
+__name(validId, "validId");
+function parseAssetIds(value) {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_ASSETS_PER_REQUEST) {
+    return null;
+  }
+  const ids = [];
+  for (const assetId of value) {
+    if (typeof assetId !== "string" && typeof assetId !== "number") return null;
+    const text = String(assetId);
+    if (!validId(text)) return null;
+    ids.push(Number(text));
+  }
+  return [...new Set(ids)];
+}
+__name(parseAssetIds, "parseAssetIds");
+function safeThumbnailUrl(value) {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") return null;
+    if (url.hostname !== "rbxcdn.com" && !url.hostname.endsWith(".rbxcdn.com")) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+__name(safeThumbnailUrl, "safeThumbnailUrl");
+function unavailableAssetDetails(id) {
+  return {
+    id,
+    name: `Asset_${id}`,
+    description: "",
+    assetTypeId: null,
+    assetType: "Unknown",
+    metadataAvailable: false,
+    metadataStatus: "PRIVATE / NOT FOUND",
+    error: "Asset metadata is unavailable or not publicly accessible."
+  };
+}
+__name(unavailableAssetDetails, "unavailableAssetDetails");
+async function getAssetDetails(id) {
+  const response = await fetch(`${ASSET_DETAILS_ENDPOINT}/${id}/details`, {
+    headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(1e4)
+  });
+  if (response.status === 429) {
+    throw new RobloxRateLimitError(response.headers.get("Retry-After"));
+  }
+  if (response.status === 404 || response.status === 403) return unavailableAssetDetails(id);
+  if (!response.ok) {
+    console.error(`Roblox asset details returned HTTP ${response.status} for asset ${id}.`);
+    return unavailableAssetDetails(id);
+  }
+  let details;
+  try {
+    details = await response.json();
+  } catch (error) {
+    console.error(`Roblox returned invalid metadata for asset ${id}.`, error);
+    return unavailableAssetDetails(id);
+  }
+  if (!details || Number(details.AssetId) !== id || !Number.isInteger(details.AssetTypeId)) {
+    console.error(`Roblox returned incomplete metadata for asset ${id}.`);
+    return unavailableAssetDetails(id);
+  }
+  return {
+    id,
+    name: typeof details.Name === "string" ? details.Name : `Asset ${id}`,
+    description: typeof details.Description === "string" ? details.Description : "",
+    assetTypeId: details.AssetTypeId,
+    assetType: ASSET_TYPES.get(details.AssetTypeId) ?? "Asset",
+    status: details.IsForSale === true ? "For sale" : "Not for sale",
+    isLimited: details.IsLimited === true,
+    metadataAvailable: true,
+    metadataStatus: "METADATA FOUND"
+  };
+}
+__name(getAssetDetails, "getAssetDetails");
+async function getPreviews(request, origin) {
+  if (!request.headers.get("Content-Type")?.toLowerCase().includes("application/json")) {
+    return jsonResponse2({ error: "Content-Type must be application/json." }, 415, origin);
+  }
+  if (Number(request.headers.get("Content-Length") ?? 0) > MAX_BODY_BYTES2) {
+    return jsonResponse2({ error: "Request body is too large." }, 413, origin);
+  }
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse2({ error: "Request body must be valid JSON." }, 400, origin);
+  }
+  const ids = parseAssetIds(body?.assetIds);
+  if (!ids) {
+    return jsonResponse2({
+      error: `assetIds must contain between 1 and ${MAX_ASSETS_PER_REQUEST} positive Roblox asset IDs.`
+    }, 400, origin);
+  }
+  try {
+    const detailResults = await Promise.all(ids.map(async (id) => {
+      try {
+        return await getAssetDetails(id);
+      } catch (error) {
+        if (error instanceof RobloxRateLimitError) throw error;
+        console.error(`Roblox asset metadata lookup failed for asset ${id}.`, error);
+        return unavailableAssetDetails(id);
+      }
+    }));
+    const thumbnailUrl = new URL(THUMBNAILS_ENDPOINT);
+    thumbnailUrl.searchParams.set("assetIds", ids.join(","));
+    thumbnailUrl.searchParams.set("size", "420x420");
+    thumbnailUrl.searchParams.set("format", "Png");
+    thumbnailUrl.searchParams.set("isCircular", "false");
+    const thumbnailResponse = await fetch(thumbnailUrl, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(1e4)
+    });
+    if (thumbnailResponse.status === 429) {
+      throw new RobloxRateLimitError(thumbnailResponse.headers.get("Retry-After"));
+    }
+    if (!thumbnailResponse.ok) {
+      if (thumbnailResponse.status === 404 || thumbnailResponse.status === 403) {
+        return jsonResponse2({
+          data: detailResults.map((item) => ({
+            ...item,
+            thumbnailUrl: null,
+            thumbnailState: "Unavailable"
+          }))
+        }, 200, origin);
+      }
+      throw new Error(`Roblox thumbnails returned HTTP ${thumbnailResponse.status}.`);
+    }
+    let thumbnailPayload;
+    try {
+      thumbnailPayload = await thumbnailResponse.json();
+    } catch (error) {
+      console.error("Roblox returned invalid thumbnail metadata.", error);
+      return jsonResponse2({
+        data: detailResults.map((item) => ({
+          ...item,
+          thumbnailUrl: null,
+          thumbnailState: "Unavailable"
+        }))
+      }, 200, origin);
+    }
+    if (!thumbnailPayload || !Array.isArray(thumbnailPayload.data)) {
+      return jsonResponse2({ error: "Roblox returned an unexpected thumbnails response." }, 502, origin);
+    }
+    const thumbnails = new Map(thumbnailPayload.data.map((thumbnail) => [
+      Number(thumbnail.targetId),
+      thumbnail
+    ]));
+    const data = detailResults.map((item) => {
+      const thumbnail = thumbnails.get(item.id);
+      return {
+        ...item,
+        thumbnailUrl: safeThumbnailUrl(thumbnail?.imageUrl),
+        thumbnailState: typeof thumbnail?.state === "string" ? thumbnail.state : "Unavailable"
+      };
+    });
+    return jsonResponse2({ data }, 200, origin);
+  } catch (error) {
+    if (error instanceof RobloxRateLimitError) {
+      const response = jsonResponse2({
+        error: "Roblox rate limit reached. Wait before making another request."
+      }, 429, origin);
+      if (error.retryAfter) response.headers.set("Retry-After", error.retryAfter);
+      return response;
+    }
+    const timedOut = error instanceof Error && error.name === "TimeoutError";
+    console.error("Roblox asset metadata lookup failed.", error);
+    return jsonResponse2({
+      error: timedOut ? "Roblox asset lookup timed out." : "Could not retrieve Roblox asset metadata."
+    }, 502, origin);
+  }
+}
+__name(getPreviews, "getPreviews");
+async function onRequest4({ request }) {
+  const origin = request.headers.get("Origin");
+  const url = new URL(request.url);
+  if (request.method === "OPTIONS") {
+    if (origin && !ALLOWED_ORIGINS2.has(origin)) {
+      return jsonResponse2({ error: "Origin not allowed." }, 403, origin);
+    }
+    const headers = new Headers({
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Max-Age": "86400",
+      "Cache-Control": "no-store",
+      "Vary": "Origin"
+    });
+    if (origin) headers.set("Access-Control-Allow-Origin", origin);
+    return new Response(null, { status: 204, headers });
+  }
+  if (url.pathname !== "/api/assets/preview") return jsonResponse2({ error: "Not found." }, 404, origin);
+  if (request.method !== "POST") return jsonResponse2({ error: "Method not allowed." }, 405, origin);
+  if (origin && !ALLOWED_ORIGINS2.has(origin)) return jsonResponse2({ error: "Origin not allowed." }, 403, origin);
+  return getPreviews(request, origin);
+}
+__name(onRequest4, "onRequest");
+
+// ../.wrangler/tmp/pages-Jydy9F/functionsRoutes-0.3688421060715037.mjs
+var routes = [
+  {
+    routePath: "/api/auth/callback",
+    mountPath: "/api/auth",
+    method: "",
+    middlewares: [],
+    modules: [onRequest]
+  },
+  {
+    routePath: "/api/auth/login",
+    mountPath: "/api/auth",
+    method: "",
+    middlewares: [],
+    modules: [onRequest2]
+  },
+  {
+    routePath: "/api/catalog/details",
+    mountPath: "/api/catalog",
+    method: "",
+    middlewares: [],
+    modules: [onRequest3]
+  },
+  {
+    routePath: "/api/assets/:path*",
+    mountPath: "/api/assets",
+    method: "",
+    middlewares: [],
+    modules: [onRequest4]
+  }
+];
+
+// ../node_modules/path-to-regexp/dist.es2015/index.js
+function lexer(str) {
+  var tokens = [];
+  var i = 0;
+  while (i < str.length) {
+    var char = str[i];
+    if (char === "*" || char === "+" || char === "?") {
+      tokens.push({ type: "MODIFIER", index: i, value: str[i++] });
+      continue;
+    }
+    if (char === "\\") {
+      tokens.push({ type: "ESCAPED_CHAR", index: i++, value: str[i++] });
+      continue;
+    }
+    if (char === "{") {
+      tokens.push({ type: "OPEN", index: i, value: str[i++] });
+      continue;
+    }
+    if (char === "}") {
+      tokens.push({ type: "CLOSE", index: i, value: str[i++] });
+      continue;
+    }
+    if (char === ":") {
+      var name = "";
+      var j = i + 1;
+      while (j < str.length) {
+        var code = str.charCodeAt(j);
+        if (
+          // `0-9`
+          code >= 48 && code <= 57 || // `A-Z`
+          code >= 65 && code <= 90 || // `a-z`
+          code >= 97 && code <= 122 || // `_`
+          code === 95
+        ) {
+          name += str[j++];
+          continue;
+        }
+        break;
+      }
+      if (!name)
+        throw new TypeError("Missing parameter name at ".concat(i));
+      tokens.push({ type: "NAME", index: i, value: name });
+      i = j;
+      continue;
+    }
+    if (char === "(") {
+      var count = 1;
+      var pattern = "";
+      var j = i + 1;
+      if (str[j] === "?") {
+        throw new TypeError('Pattern cannot start with "?" at '.concat(j));
+      }
+      while (j < str.length) {
+        if (str[j] === "\\") {
+          pattern += str[j++] + str[j++];
+          continue;
+        }
+        if (str[j] === ")") {
+          count--;
+          if (count === 0) {
+            j++;
+            break;
+          }
+        } else if (str[j] === "(") {
+          count++;
+          if (str[j + 1] !== "?") {
+            throw new TypeError("Capturing groups are not allowed at ".concat(j));
+          }
+        }
+        pattern += str[j++];
+      }
+      if (count)
+        throw new TypeError("Unbalanced pattern at ".concat(i));
+      if (!pattern)
+        throw new TypeError("Missing pattern at ".concat(i));
+      tokens.push({ type: "PATTERN", index: i, value: pattern });
+      i = j;
+      continue;
+    }
+    tokens.push({ type: "CHAR", index: i, value: str[i++] });
+  }
+  tokens.push({ type: "END", index: i, value: "" });
+  return tokens;
+}
+__name(lexer, "lexer");
+function parse(str, options) {
+  if (options === void 0) {
+    options = {};
+  }
+  var tokens = lexer(str);
+  var _a = options.prefixes, prefixes = _a === void 0 ? "./" : _a, _b = options.delimiter, delimiter = _b === void 0 ? "/#?" : _b;
+  var result = [];
+  var key = 0;
+  var i = 0;
+  var path = "";
+  var tryConsume = /* @__PURE__ */ __name(function(type) {
+    if (i < tokens.length && tokens[i].type === type)
+      return tokens[i++].value;
+  }, "tryConsume");
+  var mustConsume = /* @__PURE__ */ __name(function(type) {
+    var value2 = tryConsume(type);
+    if (value2 !== void 0)
+      return value2;
+    var _a2 = tokens[i], nextType = _a2.type, index = _a2.index;
+    throw new TypeError("Unexpected ".concat(nextType, " at ").concat(index, ", expected ").concat(type));
+  }, "mustConsume");
+  var consumeText = /* @__PURE__ */ __name(function() {
+    var result2 = "";
+    var value2;
+    while (value2 = tryConsume("CHAR") || tryConsume("ESCAPED_CHAR")) {
+      result2 += value2;
+    }
+    return result2;
+  }, "consumeText");
+  var isSafe = /* @__PURE__ */ __name(function(value2) {
+    for (var _i = 0, delimiter_1 = delimiter; _i < delimiter_1.length; _i++) {
+      var char2 = delimiter_1[_i];
+      if (value2.indexOf(char2) > -1)
+        return true;
+    }
+    return false;
+  }, "isSafe");
+  var safePattern = /* @__PURE__ */ __name(function(prefix2) {
+    var prev = result[result.length - 1];
+    var prevText = prefix2 || (prev && typeof prev === "string" ? prev : "");
+    if (prev && !prevText) {
+      throw new TypeError('Must have text between two parameters, missing text after "'.concat(prev.name, '"'));
+    }
+    if (!prevText || isSafe(prevText))
+      return "[^".concat(escapeString(delimiter), "]+?");
+    return "(?:(?!".concat(escapeString(prevText), ")[^").concat(escapeString(delimiter), "])+?");
+  }, "safePattern");
+  while (i < tokens.length) {
+    var char = tryConsume("CHAR");
+    var name = tryConsume("NAME");
+    var pattern = tryConsume("PATTERN");
+    if (name || pattern) {
+      var prefix = char || "";
+      if (prefixes.indexOf(prefix) === -1) {
+        path += prefix;
+        prefix = "";
+      }
+      if (path) {
+        result.push(path);
+        path = "";
+      }
+      result.push({
+        name: name || key++,
+        prefix,
+        suffix: "",
+        pattern: pattern || safePattern(prefix),
+        modifier: tryConsume("MODIFIER") || ""
+      });
+      continue;
+    }
+    var value = char || tryConsume("ESCAPED_CHAR");
+    if (value) {
+      path += value;
+      continue;
+    }
+    if (path) {
+      result.push(path);
+      path = "";
+    }
+    var open = tryConsume("OPEN");
+    if (open) {
+      var prefix = consumeText();
+      var name_1 = tryConsume("NAME") || "";
+      var pattern_1 = tryConsume("PATTERN") || "";
+      var suffix = consumeText();
+      mustConsume("CLOSE");
+      result.push({
+        name: name_1 || (pattern_1 ? key++ : ""),
+        pattern: name_1 && !pattern_1 ? safePattern(prefix) : pattern_1,
+        prefix,
+        suffix,
+        modifier: tryConsume("MODIFIER") || ""
+      });
+      continue;
+    }
+    mustConsume("END");
+  }
+  return result;
+}
+__name(parse, "parse");
+function match(str, options) {
+  var keys = [];
+  var re = pathToRegexp(str, keys, options);
+  return regexpToFunction(re, keys, options);
+}
+__name(match, "match");
+function regexpToFunction(re, keys, options) {
+  if (options === void 0) {
+    options = {};
+  }
+  var _a = options.decode, decode = _a === void 0 ? function(x) {
+    return x;
+  } : _a;
+  return function(pathname) {
+    var m = re.exec(pathname);
+    if (!m)
+      return false;
+    var path = m[0], index = m.index;
+    var params = /* @__PURE__ */ Object.create(null);
+    var _loop_1 = /* @__PURE__ */ __name(function(i2) {
+      if (m[i2] === void 0)
+        return "continue";
+      var key = keys[i2 - 1];
+      if (key.modifier === "*" || key.modifier === "+") {
+        params[key.name] = m[i2].split(key.prefix + key.suffix).map(function(value) {
+          return decode(value, key);
+        });
+      } else {
+        params[key.name] = decode(m[i2], key);
+      }
+    }, "_loop_1");
+    for (var i = 1; i < m.length; i++) {
+      _loop_1(i);
+    }
+    return { path, index, params };
+  };
+}
+__name(regexpToFunction, "regexpToFunction");
+function escapeString(str) {
+  return str.replace(/([.+*?=^!:${}()[\]|/\\])/g, "\\$1");
+}
+__name(escapeString, "escapeString");
+function flags(options) {
+  return options && options.sensitive ? "" : "i";
+}
+__name(flags, "flags");
+function regexpToRegexp(path, keys) {
+  if (!keys)
+    return path;
+  var groupsRegex = /\((?:\?<(.*?)>)?(?!\?)/g;
+  var index = 0;
+  var execResult = groupsRegex.exec(path.source);
+  while (execResult) {
+    keys.push({
+      // Use parenthesized substring match if available, index otherwise
+      name: execResult[1] || index++,
+      prefix: "",
+      suffix: "",
+      modifier: "",
+      pattern: ""
+    });
+    execResult = groupsRegex.exec(path.source);
+  }
+  return path;
+}
+__name(regexpToRegexp, "regexpToRegexp");
+function arrayToRegexp(paths, keys, options) {
+  var parts = paths.map(function(path) {
+    return pathToRegexp(path, keys, options).source;
+  });
+  return new RegExp("(?:".concat(parts.join("|"), ")"), flags(options));
+}
+__name(arrayToRegexp, "arrayToRegexp");
+function stringToRegexp(path, keys, options) {
+  return tokensToRegexp(parse(path, options), keys, options);
+}
+__name(stringToRegexp, "stringToRegexp");
+function tokensToRegexp(tokens, keys, options) {
+  if (options === void 0) {
+    options = {};
+  }
+  var _a = options.strict, strict = _a === void 0 ? false : _a, _b = options.start, start = _b === void 0 ? true : _b, _c = options.end, end = _c === void 0 ? true : _c, _d = options.encode, encode = _d === void 0 ? function(x) {
+    return x;
+  } : _d, _e = options.delimiter, delimiter = _e === void 0 ? "/#?" : _e, _f = options.endsWith, endsWith = _f === void 0 ? "" : _f;
+  var endsWithRe = "[".concat(escapeString(endsWith), "]|$");
+  var delimiterRe = "[".concat(escapeString(delimiter), "]");
+  var route = start ? "^" : "";
+  for (var _i = 0, tokens_1 = tokens; _i < tokens_1.length; _i++) {
+    var token = tokens_1[_i];
+    if (typeof token === "string") {
+      route += escapeString(encode(token));
+    } else {
+      var prefix = escapeString(encode(token.prefix));
+      var suffix = escapeString(encode(token.suffix));
+      if (token.pattern) {
+        if (keys)
+          keys.push(token);
+        if (prefix || suffix) {
+          if (token.modifier === "+" || token.modifier === "*") {
+            var mod = token.modifier === "*" ? "?" : "";
+            route += "(?:".concat(prefix, "((?:").concat(token.pattern, ")(?:").concat(suffix).concat(prefix, "(?:").concat(token.pattern, "))*)").concat(suffix, ")").concat(mod);
+          } else {
+            route += "(?:".concat(prefix, "(").concat(token.pattern, ")").concat(suffix, ")").concat(token.modifier);
+          }
+        } else {
+          if (token.modifier === "+" || token.modifier === "*") {
+            throw new TypeError('Can not repeat "'.concat(token.name, '" without a prefix and suffix'));
+          }
+          route += "(".concat(token.pattern, ")").concat(token.modifier);
+        }
+      } else {
+        route += "(?:".concat(prefix).concat(suffix, ")").concat(token.modifier);
+      }
+    }
+  }
+  if (end) {
+    if (!strict)
+      route += "".concat(delimiterRe, "?");
+    route += !options.endsWith ? "$" : "(?=".concat(endsWithRe, ")");
+  } else {
+    var endToken = tokens[tokens.length - 1];
+    var isEndDelimited = typeof endToken === "string" ? delimiterRe.indexOf(endToken[endToken.length - 1]) > -1 : endToken === void 0;
+    if (!strict) {
+      route += "(?:".concat(delimiterRe, "(?=").concat(endsWithRe, "))?");
+    }
+    if (!isEndDelimited) {
+      route += "(?=".concat(delimiterRe, "|").concat(endsWithRe, ")");
+    }
+  }
+  return new RegExp(route, flags(options));
+}
+__name(tokensToRegexp, "tokensToRegexp");
+function pathToRegexp(path, keys, options) {
+  if (path instanceof RegExp)
+    return regexpToRegexp(path, keys);
+  if (Array.isArray(path))
+    return arrayToRegexp(path, keys, options);
+  return stringToRegexp(path, keys, options);
+}
+__name(pathToRegexp, "pathToRegexp");
+
+// ../node_modules/wrangler/templates/pages-template-worker.ts
+var escapeRegex = /[.+?^${}()|[\]\\]/g;
+function* executeRequest(request) {
+  const requestPath = new URL(request.url).pathname;
+  for (const route of [...routes].reverse()) {
+    if (route.method && route.method !== request.method) {
+      continue;
+    }
+    const routeMatcher = match(route.routePath.replace(escapeRegex, "\\$&"), {
+      end: false
+    });
+    const mountMatcher = match(route.mountPath.replace(escapeRegex, "\\$&"), {
+      end: false
+    });
+    const matchResult = routeMatcher(requestPath);
+    const mountMatchResult = mountMatcher(requestPath);
+    if (matchResult && mountMatchResult) {
+      for (const handler of route.middlewares.flat()) {
+        yield {
+          handler,
+          params: matchResult.params,
+          path: mountMatchResult.path
+        };
+      }
+    }
+  }
+  for (const route of routes) {
+    if (route.method && route.method !== request.method) {
+      continue;
+    }
+    const routeMatcher = match(route.routePath.replace(escapeRegex, "\\$&"), {
+      end: true
+    });
+    const mountMatcher = match(route.mountPath.replace(escapeRegex, "\\$&"), {
+      end: false
+    });
+    const matchResult = routeMatcher(requestPath);
+    const mountMatchResult = mountMatcher(requestPath);
+    if (matchResult && mountMatchResult && route.modules.length) {
+      for (const handler of route.modules.flat()) {
+        yield {
+          handler,
+          params: matchResult.params,
+          path: matchResult.path
+        };
+      }
+      break;
+    }
+  }
+}
+__name(executeRequest, "executeRequest");
+var pages_template_worker_default = {
+  async fetch(originalRequest, env, workerContext) {
+    let request = originalRequest;
+    const handlerIterator = executeRequest(request);
+    let data = {};
+    let isFailOpen = false;
+    const next = /* @__PURE__ */ __name(async (input, init) => {
+      if (input !== void 0) {
+        let url = input;
+        if (typeof input === "string") {
+          url = new URL(input, request.url).toString();
+        }
+        request = new Request(url, init);
+      }
+      const result = handlerIterator.next();
+      if (result.done === false) {
+        const { handler, params, path } = result.value;
+        const context = {
+          request: new Request(request.clone()),
+          functionPath: path,
+          next,
+          params,
+          get data() {
+            return data;
+          },
+          set data(value) {
+            if (typeof value !== "object" || value === null) {
+              throw new Error("context.data must be an object");
+            }
+            data = value;
+          },
+          env,
+          waitUntil: workerContext.waitUntil.bind(workerContext),
+          passThroughOnException: /* @__PURE__ */ __name(() => {
+            isFailOpen = true;
+          }, "passThroughOnException")
+        };
+        const response = await handler(context);
+        if (!(response instanceof Response)) {
+          throw new Error("Your Pages function should return a Response");
+        }
+        return cloneResponse(response);
+      } else if ("ASSETS") {
+        const response = await env["ASSETS"].fetch(request);
+        return cloneResponse(response);
+      } else {
+        const response = await fetch(request);
+        return cloneResponse(response);
+      }
+    }, "next");
+    try {
+      return await next();
+    } catch (error) {
+      if (isFailOpen) {
+        const response = await env["ASSETS"].fetch(request);
+        return cloneResponse(response);
+      }
+      throw error;
+    }
+  }
+};
+var cloneResponse = /* @__PURE__ */ __name((response) => (
+  // https://fetch.spec.whatwg.org/#null-body-status
+  new Response(
+    [101, 204, 205, 304].includes(response.status) ? null : response.body,
+    response
+  )
+), "cloneResponse");
+export {
+  pages_template_worker_default as default
+};
+
+------formdata-undici-017295161229--
